@@ -224,7 +224,7 @@ elif modelval == 'quad_exp_iso':
     npar = 10
     prior_cube = prior_iso
 
-nlp = 250
+nlp = 100
 t1 = time()
 pmn.run(llhood, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_JLA_'+zval+'_'+modelval+'_'+pv_str+'_'+bstr+'_lp'+str(nlp)+'-')
 t2 = time()

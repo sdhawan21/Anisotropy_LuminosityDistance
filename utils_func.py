@@ -78,7 +78,9 @@ def dl_q0dip_h0quad(z, theta, ra, dec, lcmb = 264.021, bcmb = 48.523,  coord1=(1
     These models are named "quad_aniso" , "quad_iso" respectively
     
     for "quad_iso" it follows the same as the iso model in the dipole only case
-    """
+    this includes "quad_exp_iso" where the quadrupole has an exponentially decaying scale but the dipole is isotropic
+    "quad_exp_aniso" is with both the quadrupolar and dipolar anisotropy
+    """ 
     if model == 'const':
         h0, q0, qd, j0 = theta
     elif model == 'exp':
@@ -90,7 +92,9 @@ def dl_q0dip_h0quad(z, theta, ra, dec, lcmb = 264.021, bcmb = 48.523,  coord1=(1
     elif model == 'quad_iso':
         h0, q0, j0, lam1, lam2 = theta
     elif model == 'quad_exp_iso': 
-        h0, q0, j0, lam1, lam2, S = theta 
+        h0, q0, j0, lam1, lam2, Sq = theta
+    elif model == 'quad_exp_aniso':
+         h0, q0, qd, j0, S, lam1, lam2, Sq = theta
 
     coords = SkyCoord(ra, dec, frame='icrs', unit="deg")
     gal_coords = coords.galactic
@@ -104,15 +108,15 @@ def dl_q0dip_h0quad(z, theta, ra, dec, lcmb = 264.021, bcmb = 48.523,  coord1=(1
     sep3 = vincenty_sep(gal_coords.l.deg * np.pi/180., gal_coords.b.deg * np.pi/180., coord3[0] * np.pi/180., coord3[1] * np.pi/180.)
     
     #the quadrupole term is just a pre-factor so I wrote it out here as a separate variable
-    if model == 'quad_exp_iso':
-        F = np.exp(-z / S) 
+    if model == 'quad_exp_iso' or model == 'quad_exp_aniso' :
+        F = np.exp(-z / Sq) 
     else:
         F = 1.
     pre_fac_quad = pow(1 + (lam1 * (np.cos(sep1) ** 2.) + lam2 * (np.cos(sep2) ** 2.) - (lam1 + lam2) * (np.cos(sep3) ** 2.)) * F , -1)
 
     if model == 'const':
         q = q0 + qd * np.cos(sep) 
-    elif model == 'exp' or model == 'quad_aniso':
+    elif model == 'exp' or model == 'quad_aniso' or model == 'quad_exp_aniso':
         q = q0 + qd * np.cos(sep) * np.exp(- z / S)
     elif model == 'iso' or model == 'quad_iso' or model == 'quad_exp_iso':
         q = q0

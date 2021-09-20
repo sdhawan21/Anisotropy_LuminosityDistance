@@ -7,7 +7,7 @@ import os
 import pandas as pd
 
 from astropy.coordinates import SkyCoord
-from utils_func import vincenty_sep
+from utils_func import vincenty_sep, get_zcmb, dl_q0dip_h0quad
 
 
 # load SN data
@@ -18,7 +18,7 @@ sys_SN = np.loadtxt('Pantheon/data_fitres/sys_full_long_G10.txt', skiprows=1).re
 zhel_SN = np.loadtxt('Pantheon/lcparam_full_long_zhel.txt', dtype=str, skiprows=1)
 
 zval = sys.argv[1]
-zval_arr = ['cmb', 'hd']
+zval_arr = ['cmb', 'hd', 'hel']
 
 #reorganise the data to fit 
 print(varnames)
@@ -43,6 +43,16 @@ elif zval == 'hel':
 
 modelval = sys.argv[2]
 c = 299792.458 #in km/s
+
+fitSlopes = bool(sys.argv[3])
+
+#this is where we should define the mb, x1, c for the arrays 
+mB_SN = data_SN[:,np.where(varnames == "mB")[0][0]].astype('float32')
+x1_SN = data_SN[:,np.where(varnames == "x1")[0][0]].astype('float32')
+salt2c_SN = data_SN[:,np.where(varnames == "c")[0][0]].astype('float32')
+muerr_SN = data_SN[:,np.where(varnames == "MUERR")[0][0]].astype('float32')
+hostmass_SN = data_SN[:,np.where(varnames == "HOST_LOGMASS")[0][0]].astype('float32')
+
 
 def dl_q0aniso(z, theta, ra, dec, lcmb = 264.021, bcmb = 48.523, model='const'):
     """
@@ -73,12 +83,35 @@ def llhood(model_param, ndim, npar):
          h0, q0, qd, j0, M = [model_param[i] for i in range(5)]
          theta = [h0, q0, qd, j0]
     elif modelval == 'exp':
-        h0, q0, qd, j0, S, M = [model_param[i] for i in range(6)]
+        h0, q0, qd, j0, M, S = [model_param[i] for i in range(6)]
         theta = [h0, q0, qd, j0, S]
+    elif modelval == 'quad_exp_aniso': 
+        h0, q0, qd, j0, S, M, lam1, lam2, Sq = [model_param[i] for i in range(9)]
+        theta = [h0, q0, qd, j0, S, lam1, lam2, Sq]
+        
+    if modelval == 'quad_exp_aniso':
+        dl_aniso = dl_q0dip_h0quad(z_SN, theta, RA_SN, Dec_SN, model=modelval)
+        mu_th = 5 * np.log10(dl_aniso) + 25.
+    else:
+        dl_aniso = dl_q0aniso(z_SN, theta, RA_SN, Dec_SN, model=modelval)
+        mu_th = 5*np.log10(dl_aniso) + 25.
+    delta1 = mu_SN - mu_th + M 
+    chisq = np.dot(delta1.T, np.dot(cinv_SN, delta1))
+    return -0.5*chisq
 
+def llhood_fitSlopes(model_param, ndim, npar):
+    if modelval == 'const':
+         h0, q0, qd, j0, M, alpha, beta, delta = [model_param[i] for i in range(8)]
+         theta = [h0, q0, qd, j0]
+    elif modelval == 'exp':
+        h0, q0, qd, j0, M, alpha, beta, delta, S = [model_param[i] for i in range(9)]
+        theta = [h0, q0, qd, j0, S]
+    #apply the Tripp relation
+    mu_OBS = mB_SN + alpha * x1_SN - beta * salt2c_SN
+    mu_OBS[hostmass_SN >= 10.] += delta
     dl_aniso = dl_q0aniso(z_SN, theta, RA_SN, Dec_SN, model=modelval)
     mu_th = 5*np.log10(dl_aniso) + 25.
-    delta1 = mu_SN - mu_th + M 
+    delta1 = mu_OBS - mu_th + M 
     chisq = np.dot(delta1.T, np.dot(cinv_SN, delta1))
     return -0.5*chisq
 
@@ -90,15 +123,42 @@ def prior(cube, ndim, npar):
     cube[4] = cube[4] * 4. - 2.
     if modelval == 'exp':
         cube[5] = cube[5] * 4. - 2.
+    elif modelval == 'quad_exp_aniso':
+        cube[5] = cube[5] * 4. - 2.
+        cube[6] = cube[6] * 4. - 2.
+        cube[7] = cube[7] * 4. - 2.
+        cube[8] = cube[8] * 2. - 1.
+
+def prior_fitSlopes(cube, ndim, npar):
+    cube[0] = cube[0] * 50. + 50.
+    cube[1] = cube[1] * 8. - 4.
+    cube[2] = cube[2] * 20. - 10.
+    cube[3] = cube[3] * 20. - 10.
+    cube[4] = cube[4] * 70. - 35. 	#this is not on a mu scale but an mB scale
+    cube[5] = cube[5] * 1.
+    cube[6] = cube[6] * 4. 
+    cube[7] = cube[7] * 0.5
+    if modelval == 'exp':
+        cube[8] = cube[8] * 4. - 2.
 
 chainsdir = 'chains/'
 if not os.path.exists(chainsdir):
     os.makedirs(chainsdir)
 
 if modelval == 'const':
-    npar = 5
+    if fitSlopes:
+        npar = 8 
+    else:
+        npar = 5
 elif modelval == 'exp':
-    npar = 6
+    if fitSlopes:
+        npar = 9
+    else:
+        npar = 6
+elif modelval == 'quad_exp_aniso':
+    npar = 9
 
-
-pmn.run(llhood, prior, npar, verbose=True, n_live_points=150, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'-')
+if fitSlopes:
+    pmn.run(llhood_fitSlopes, prior_fitSlopes, npar, verbose=True, n_live_points=150, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'fitSlopes-')
+else:
+    pmn.run(llhood, prior, npar, verbose=True, n_live_points=150, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'-')

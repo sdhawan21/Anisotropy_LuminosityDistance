@@ -8,7 +8,7 @@ import pandas as pd
 
 from astropy.coordinates import SkyCoord
 from utils_func import vincenty_sep, get_zcmb, dl_q0dip_h0quad
-
+from time import time
 
 # load SN data
 varnames = np.loadtxt('Pantheon/data_fitres/Ancillary_G10.FITRES', skiprows=6, dtype=str)[0]
@@ -79,6 +79,7 @@ def dl_q0aniso(z, theta, ra, dec, lcmb = 264.021, bcmb = 48.523, model='const'):
     return dl
 
 def llhood(model_param, ndim, npar):
+    #fitting different quadrupole models to the data
     if modelval == 'const':
          h0, q0, qd, j0, M = [model_param[i] for i in range(5)]
          theta = [h0, q0, qd, j0]
@@ -86,10 +87,13 @@ def llhood(model_param, ndim, npar):
         h0, q0, qd, j0, M, S = [model_param[i] for i in range(6)]
         theta = [h0, q0, qd, j0, S]
     elif modelval == 'quad_exp_aniso': 
-        h0, q0, qd, j0, S, M, lam1, lam2, Sq = [model_param[i] for i in range(9)]
+        h0, q0, j0, qd, S, M, lam1, lam2, Sq = [model_param[i] for i in range(9)]
         theta = [h0, q0, qd, j0, S, lam1, lam2, Sq]
-        
-    if modelval == 'quad_exp_aniso':
+    elif modelval == 'quad_exp_iso':
+        h0, q0, j0, M, lam1, lam2, Sq = [model_param[i] for i in range(7)]
+        theta = [h0, q0, j0, lam1, lam2, Sq]
+    #for models with a quadrupole, using the quad distance expression
+    if modelval == 'quad_exp_aniso' or 'quad_exp_iso':
         dl_aniso = dl_q0dip_h0quad(z_SN, theta, RA_SN, Dec_SN, model=modelval)
         mu_th = 5 * np.log10(dl_aniso) + 25.
     else:
@@ -104,7 +108,7 @@ def llhood_fitSlopes(model_param, ndim, npar):
          h0, q0, qd, j0, M, alpha, beta, delta = [model_param[i] for i in range(8)]
          theta = [h0, q0, qd, j0]
     elif modelval == 'exp':
-        h0, q0, qd, j0, M, alpha, beta, delta, S = [model_param[i] for i in range(9)]
+        h0, q0, j0, qd, M, alpha, beta, delta, S = [model_param[i] for i in range(9)]
         theta = [h0, q0, qd, j0, S]
     #apply the Tripp relation
     mu_OBS = mB_SN + alpha * x1_SN - beta * salt2c_SN
@@ -119,15 +123,22 @@ def prior(cube, ndim, npar):
     cube[0] = cube[0] * 50. + 50.
     cube[1] = cube[1] * 8. - 4.
     cube[2] = cube[2] * 20. - 10.
-    cube[3] = cube[3] * 20. - 10.
-    cube[4] = cube[4] * 4. - 2.
     if modelval == 'exp':
+        cube[3] = cube[3] * 20. - 10.
+        cube[4] = cube[4] * 4. - 2.
         cube[5] = cube[5] * 4. - 2.
     elif modelval == 'quad_exp_aniso':
+        cube[3] = cube[3] * 20. - 10.
+        cube[4] = cube[4] * 4. - 2.
         cube[5] = cube[5] * 4. - 2.
         cube[6] = cube[6] * 4. - 2.
         cube[7] = cube[7] * 4. - 2.
         cube[8] = cube[8] * 2. - 1.
+    elif modelval == 'quad_exp_iso':
+        cube[3] = cube[3] * 4. - 2.
+        cube[4] = cube[4] * 4. - 2.
+        cube[5] = cube[5] * 4. - 2.
+        cube[6] = cube[6] * 2. - 1. 
 
 def prior_fitSlopes(cube, ndim, npar):
     cube[0] = cube[0] * 50. + 50.
@@ -157,8 +168,14 @@ elif modelval == 'exp':
         npar = 6
 elif modelval == 'quad_exp_aniso':
     npar = 9
-
+elif modelval   == 'quad_exp_iso':
+    npar = 7
+nlp = int(sys.argv[5])
+start = time()
 if fitSlopes:
-    pmn.run(llhood_fitSlopes, prior_fitSlopes, npar, verbose=True, n_live_points=150, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'fitSlopes-')
+    pmn.run(llhood_fitSlopes, prior_fitSlopes, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'fitSlopes'+'_lp'+str(nlp)+'-')
 else:
-    pmn.run(llhood, prior, npar, verbose=True, n_live_points=150, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'-')
+    pmn.run(llhood, prior, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'_lp'+str(nlp)+'-')
+end = time()
+duration = (end - start)/60.
+print("it took ", duration," minutes")

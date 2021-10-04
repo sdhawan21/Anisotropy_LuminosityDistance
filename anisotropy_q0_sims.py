@@ -30,15 +30,13 @@ num_SN = len(data_SN)
 sys_SN = np.loadtxt('Pantheon/data_fitres/sys_full_long_G10.txt', skiprows=1).reshape(num_SN, num_SN)
 zhel_SN = np.loadtxt('Pantheon/lcparam_full_long_zhel.txt', dtype=str, skiprows=1)
 
-zval = sys.argv[1]
-zval_arr = ['cmb', 'hd', 'hel']
+
 
 #reorganise the data to fit 
 print(varnames)
 mu_SN = data_SN[:,np.where(varnames == "MU")[0][0]].astype('float32')
 muerr_hd = data_SN[:,np.where(varnames == "MUERR")[0][0]].astype('float32')
 
-zCMB_SN = data_SN[:,np.where(varnames == "zCMB")[0][0]].astype('float32')
 zhd = data_SN[:,np.where(varnames == "zHD")[0][0]].astype('float32')
 
 RA_SN = data_SN[:,np.where(varnames == "RA")[0][0]].astype('float32')
@@ -54,10 +52,10 @@ if uniform_coord:
     Dec_SN = np.random.uniform(-90, 90, len(zhd))
  
 
-
+zcut = 0.1
 
 #define the arrays for the concatenation and fill the first NSN values with the original data
-zlow = zhd[zhd < 0.1]
+zlow = zhd[zhd < zcut]
 
 zsim = np.zeros(len(zhd) + nfac * len(zlow))
 rasim = np.zeros(len(zhd) + nfac * len(zlow))
@@ -68,16 +66,16 @@ zsim[:len(zhd)] = zhd
 rasim[:len(zhd)] = RA_SN
 decsim[:len(zhd)] = Dec_SN
 muerr_sim[:len(zhd)] = muerr_hd
-
+#muerr_sim /= 10
 #how many SNe to augment the low-z anchor by
 for i in range(nfac):
     zsim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = zlow
-    rasim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = RA_SN[zhd < 0.1]
-    decsim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = Dec_SN[zhd < 0.1]
-    muerr_sim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = muerr_hd[zhd < 0.1]
+    rasim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = RA_SN[zhd < zcut]
+    decsim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = Dec_SN[zhd < zcut]
+    muerr_sim[len(zhd) + i*len(zlow): len(zhd) + (i+1) * len(zlow)] = muerr_hd[zhd < zcut]
 
 #muerr_hd[zhd < 0.1] /= np.sqrt(nfac)
-print(len(zhd[zhd < 0.1]))
+print(len(zhd[zhd < zcut]))
 
 #define the simulated distances for the zsim array. this is with an LCDM cosmology
 mu_synth = flc.distmod(zsim).value
@@ -85,7 +83,7 @@ mu_synth += np.random.normal(0., 0.15, len(zsim))
 
 #fix to the PV corrected redshift 
 z_SN = zsim
-stat_only = True #this needs to be changed with the adequate systematics error covariance (use Pantheon 1? 2? some forecast?)
+stat_only = bool(sys.argv[4])#this needs to be changed with the adequate systematics error covariance (use Pantheon 1? 2? some forecast?)
 
 modelval = 'quad_exp_iso'
 
@@ -98,18 +96,23 @@ if quad_input:
 else:
     mu_sims = mu_synth
 
+C = np.diag(muerr_sim ** 2.) #covariance matrix is stat-only
+
+#if not stat_only:
+#    C += sys_SN
+
+cinv_SN = np.linalg.inv(C)
+
 def llhood(model_param, npar, ndim):
     if modelval == 'quad_exp_iso':
-        h0, q0, j0, M, alpha, beta, dmass, lam1, lam2, S  = [model_param[i] for i in range(10)]
+        h0, q0, j0, M, lam1, lam2, S  = [model_param[i] for i in range(7)]
         theta = [h0, q0,  j0, lam1, lam2, S]
 
-
-    C = np.diag(muerr_hd ** 2.)
-    cinv_SN = np.linalg.inv(C) 
+ 
     dl_aniso = dl_q0dip_h0quad(z_SN, theta, rasim, decsim, model=modelval)
 
     mu_th = 5 * np.log10(dl_aniso) + 25.
-    delta1 = mu_synth - mu_th + M 
+    delta1 = mu_sims - mu_th + M 
     chisq = np.dot(delta1.T, np.dot(cinv_SN, delta1))
     return -0.5*chisq
 
@@ -120,31 +123,25 @@ def prior(cube, ndim, npar):
     cube[2] = cube[2] * 20. - 10.
     cube[3] = cube[3] * 20. - 10.
     cube[4] = cube[4] * 70. - 35.
-    cube[5] = cube[5] * 1.
-    cube[6] = cube[6] * 4.
-    cube[7] = cube[7] * 0.5
     if modelval == 'exp':
-        cube[8] = cube[8] * 4. - 2.
+        cube[5] = cube[5] * 4. - 2.
     elif modelval == "quad_aniso":
-        cube[8] = cube[8] * 4. - 2.
-        cube[9] = cube[9] * 4. - 2.
-        cube[10] = cube[10] * 4. - 2.
+        cube[5] = cube[5] * 4. - 2.
+        cube[6] = cube[6] * 4. - 2.
+        cube[7] = cube[7] * 4. - 2.
 
 def prior_iso(cube, ndim, npar):
-    cube[0] = cube[0] * 50. + 50.
-    cube[1] = cube[1] * 8. - 4.
-    cube[2] = cube[2] * 20. - 10.
-    cube[3] = cube[3] * 70. - 35. 
-    cube[4] = cube[4] * 1. 
-    cube[5] = cube[5] * 4. 
-    cube[6] = cube[6] * 0.5
+    cube[0] = cube[0] * 50. + 50.   #h0
+    cube[1] = cube[1] * 8. - 4.     #q0
+    cube[2] = cube[2] * 20. - 10.   #j0
+    cube[3] = cube[3] * 70. - 35.   #M
     if modelval == "quad_iso":
-        cube[7] = cube[7] * 4. - 2.
-        cube[8] = cube[8] * 4. - 2.
+        cube[4] = cube[4] * 4. - 2.
+        cube[5] = cube[5] * 4. - 2.
     if modelval == "quad_exp_iso":
-        cube[7] = cube[7] * 4. - 2.
-        cube[8] = cube[8] * 4. - 2.
-        cube[9] = cube[9] * 2. - 1.
+        cube[4] = cube[4] * 4. - 2. #lam1
+        cube[5] = cube[5] * 4. - 2. #lam2
+        cube[6] = cube[6] * 2. - 1. #S
 
 chainsdir = 'chains/'
 if not os.path.exists(chainsdir):
@@ -153,25 +150,25 @@ if not os.path.exists(chainsdir):
 #a bit wordy but this is where I define the number of parameters and the hypercube for the parameter priors to be passed
 #to the PyMultiNest run function
 if modelval == 'const':
-    npar = 8
+    npar = 5
     prior_cube = prior 
 elif modelval == 'exp':
-    npar = 9
+    npar = 6
     prior_cube = prior
 elif modelval == 'iso':
-    npar = 7
+    npar = 4
     prior_cube = prior_iso
 
 elif modelval == 'quad_aniso':
-    npar = 11
+    npar = 8
     prior_cube = prior 
 
 elif modelval == 'quad_iso':
-    npar = 9
+    npar = 6
     prior_cube = prior_iso
 
 elif modelval == 'quad_exp_iso':
-    npar = 10
+    npar = 7
     prior_cube = prior_iso
 
 if stat_only:
@@ -188,6 +185,7 @@ if quad_input:
     inpval = "NonZeroQuad"
 else:
     inpval = "LCDM"
+
 nlp = 200
 t1 = time()
 pmn.run(llhood, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/sims/q0aniso_sims_'+modelval+'_'+coordval+'_'+inpval+'_'+str(nfac)+"_"+cov_str+'_lp'+str(nlp)+'-')

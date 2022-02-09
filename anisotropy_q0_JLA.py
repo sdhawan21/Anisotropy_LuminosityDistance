@@ -10,6 +10,9 @@ This docstring is to keep a track of the different "cases" or input toggles for 
 NOTE: the zCMB includes a PV correction, do the boost yourself
 Include the model with isotropic case as well
 
+
+ATTENTION: also runs with a fixed alpha and beta
+
 Redshift list
 - zCMB -> I compute this by hand using l,b from Kogut+1996
 - zHel
@@ -65,12 +68,12 @@ hostmass_SN = data_SN['mhost']
 #compute the boost to the CMB frame instead of using the zcmb in the JLA files since that will likely include a
 # peculiar velocity correction which we cant test for
 zCMB_SN = get_zcmb(data_SN['zhel'].values, data_SN['ra'].values, data_SN['dec'].values)
-print(zCMB_SN)
+#print(zCMB_SN)
 zPV_SN = data_SN['zcmb']
 zHEL_SN = data_SN['zhel']
-print(zCMB_SN, zHEL_SN.values)
 RA_SN = data_SN['ra']
 Dec_SN = data_SN['dec']
+
 if zval == 'cmb':
     z_SN = np.array(zCMB_SN)
 elif zval == 'hel':
@@ -94,6 +97,8 @@ else:
 
 biasCor = bool(sys.argv[4])
 
+
+
 if biasCor:
     data_SN['mb'] -= data_SN['biascor']
     bstr='BiasSub'
@@ -102,7 +107,7 @@ else:
     bstr='FidNoBiasSub'
 
 
-
+fixSlopes = bool(sys.argv[5])
 
 
 def mu_cov(alpha, beta, sig_pecvel=True):
@@ -127,11 +132,21 @@ def mu_cov(alpha, beta, sig_pecvel=True):
     
     return Cmu
 
+#if im fitting with alpha, beta and delta fixed for a single case, this is where i should define that 
+#define a separate likelihood for this case
+alpha = 0.14
+beta = 3.1
+delta = 0.07
+C = mu_cov(alpha, beta, sig_pecvel=pec_sig)
+cinv_SN = np.linalg.inv(C)
+print(np.shape(cinv_SN))
+#sys.exit()
+
 
 #have a likelihood with all models as options
 def llhood(model_param, ndim, npar):
     if modelval == 'const':
-         h0, q0, qd, j0, M, alpha, beta, dmass = [model_param[i] for i in range(8)]
+            h0, q0, qd, j0, M, alpha, beta, dmass = [model_param[i] for i in range(8)]
          theta = [h0, q0, qd, j0]
     elif modelval == 'exp':
         h0, q0, qd, j0, M, alpha, beta, dmass, S  = [model_param[i] for i in range(9)]
@@ -148,6 +163,9 @@ def llhood(model_param, ndim, npar):
     elif modelval == 'quad_exp_iso':
         h0, q0, j0, M, alpha, beta, dmass, lam1, lam2, S  = [model_param[i] for i in range(10)]
         theta = [h0, q0,  j0, lam1, lam2, S]
+    elif modelval == 'quad_exp_aniso':
+        h0, q0, qd, j0, M, alpha, beta, dmass, lam1, lam2, Sd, Sq  = [model_param[i] for i in range(12)]
+        theta = [h0, q0, qd, j0, lam1, lam2, Sd, Sq]
  
     C = mu_cov(alpha, beta, sig_pecvel=pec_sig)
     cinv_SN = np.linalg.inv(C)
@@ -164,12 +182,54 @@ def llhood(model_param, ndim, npar):
     chisq = np.dot(delta1.T, np.dot(cinv_SN, delta1))
     return -0.5*chisq
 
+dmass = delta 
+mu_SN = mb_SN + alpha * x1_SN - beta * c_SN 
+mu_SN[hostmass_SN >= 10.] += delta
+#have a likelihood with all models as options
+def llhood_fixed(model_param, ndim, npar):
+    if modelval == 'const':
+         h0, q0, qd, j0, M = [model_param[i] for i in range(5)]
+         theta = [h0, q0, qd, j0]
+    elif modelval == 'exp':
+        h0, q0, qd, j0, M, S  = [model_param[i] for i in range(6)]
+        theta = [h0, q0, qd, j0, S]
+    elif modelval == 'iso':
+        h0, q0, j0, M  = [model_param[i] for i in range(4)]
+        theta = [h0, q0, j0]
+    elif modelval == 'quad_aniso':
+        h0, q0, qd, j0, M, S, lam1, lam2  = [model_param[i] for i in range(8)]
+        theta = [h0, q0, qd, j0, S, lam1, lam2]
+    elif modelval == 'quad_iso': 
+        h0, q0, j0, M, lam1, lam2  = [model_param[i] for i in range(6)]
+        theta = [h0, q0,  j0, lam1, lam2]
+    elif modelval == 'quad_exp_iso':
+        h0, q0, j0, M,  lam1, lam2, S  = [model_param[i] for i in range(7)]
+        theta = [h0, q0,  j0, lam1, lam2, S]
+    elif modelval == 'quad_exp_aniso':
+        h0, q0, qd, j0, M, lam1, lam2, Sd, Sq  = [model_param[i] for i in range(9)]
+        theta = [h0, q0, qd, j0, lam1, lam2, Sd, Sq]
+ 
+    
+
+    
+
+    #this part about fitting the quadrupole has modelval twice which is a little superfluous
+    #not anymore?
+    if "quad" in modelval:
+        dl_aniso = dl_q0dip_h0quad(z_SN, theta, RA_SN, Dec_SN, model=modelval)
+    else:
+        dl_aniso = dl_q0aniso(z_SN, theta, RA_SN, Dec_SN, model=modelval)
+    mu_th = 5 * np.log10(dl_aniso) + 25.
+    delta1 = mu_SN - mu_th + M 
+    chisq = np.dot(delta1.T, np.dot(cinv_SN, delta1))
+    return -0.5*chisq
+
 def prior(cube, ndim, npar):
     cube[0] = cube[0] * 50. + 50.
-    cube[1] = cube[1] * 8. - 4.
-    cube[2] = cube[2] * 20. - 10.
-    cube[3] = cube[3] * 20. - 10.
-    cube[4] = cube[4] * 70. - 35.
+    cube[1] = cube[1] * 8. - 4.	#q0
+    cube[2] = cube[2] * 20. - 10. #qd
+    cube[3] = cube[3] * 20. - 10. #j0
+    cube[4] = cube[4] * 70. - 35. 
     cube[5] = cube[5] * 1.
     cube[6] = cube[6] * 4.
     cube[7] = cube[7] * 0.5
@@ -179,7 +239,11 @@ def prior(cube, ndim, npar):
         cube[8] = cube[8] * 4. - 2.
         cube[9] = cube[9] * 4. - 2.
         cube[10] = cube[10] * 4. - 2.
-
+    elif modelval == "quad_exp_aniso":
+        cube[8] = cube[8] * 4. - 2.
+        cube[9] = cube[9] * 4. - 2.
+        cube[10] = cube[10] * 4. - 2.
+        cube[11] = cube[11] * 4. - 2.
 def prior_iso(cube, ndim, npar):
     cube[0] = cube[0] * 50. + 50.
     cube[1] = cube[1] * 8. - 4.
@@ -195,7 +259,34 @@ def prior_iso(cube, ndim, npar):
         cube[7] = cube[7] * 4. - 2.
         cube[8] = cube[8] * 4. - 2.
         cube[9] = cube[9] * 2. - 1. 
-    
+
+def prior_fixslopes(cube, ndim, npar):
+    cube[0] = cube[0] * 50. + 50.
+    cube[1] = cube[1] * 8. - 4. #q0
+    cube[2] = cube[2] * 20. - 10. #qd
+    cube[3] = cube[3] * 20. - 10. #j0
+    cube[4] = cube[4] * 70. - 35. 
+    if modelval == 'exp':
+        cube[5] = cube[5] * 4. - 2.
+    elif modelval == "quad_aniso":
+        cube[5] = cube[5] * 4. - 2.
+        cube[6] = cube[6] * 4. - 2.
+        cube[7] = cube[7] * 4.# - 2.
+    elif modelval == "quad_exp_aniso":
+        cube[5] = cube[5] * 4. - 2.
+        cube[6] = cube[6] * 4. - 2.
+        cube[7] = cube[7] * 4. - 2.
+        cube[8] = cube[8] * 4.# - 2.
+
+def prior_exp_iso(cube, ndim, npar):
+    cube[0] = cube[0] * 50. + 50.
+    cube[1] = cube[1] * 8. - 4. #q0
+    cube[2] = cube[2] * 20. - 10. #j0
+    cube[3] = cube[3] * 70. - 35. 
+    cube[4] = cube[4] * 4. - 2.
+    cube[5] = cube[5] * 4. - 2. 
+    cube[6] = cube[6] * 4.# - 2.
+
 chainsdir = 'chains/'
 if not os.path.exists(chainsdir):
     os.makedirs(chainsdir)
@@ -203,30 +294,43 @@ if not os.path.exists(chainsdir):
 #a bit wordy but this is where I define the number of parameters and the hypercube for the parameter priors to be passed
 #to the PyMultiNest run function
 if modelval == 'const':
-    npar = 8
+    npar = 5
     prior_cube = prior 
 elif modelval == 'exp':
-    npar = 9
+    npar = 6
     prior_cube = prior
 elif modelval == 'iso':
-    npar = 7
+    npar = 4
     prior_cube = prior_iso
 
 elif modelval == 'quad_aniso':
-    npar = 11
+    npar = 8
     prior_cube = prior 
 
 elif modelval == 'quad_iso':
-    npar = 9
+    npar = 6
     prior_cube = prior_iso
 
 elif modelval == 'quad_exp_iso':
-    npar = 10
-    prior_cube = prior_iso
+    npar = 7
+    prior_cube = prior_exp_iso
+elif modelval == 'quad_exp_aniso':
+	npar = 9
+	prior_cube = prior 
 
-nlp = 100
+nlp = int(sys.argv[6])
 t1 = time()
-pmn.run(llhood, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_JLA_'+zval+'_'+modelval+'_'+pv_str+'_'+bstr+'_lp'+str(nlp)+'-')
+
+if fixSlopes:
+    fix_str = "fixedSlope"
+    if modelval == "quad_exp_iso":
+        pmn.run(llhood_fixed, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_JLA_'+zval+'_'+modelval+'_'+pv_str+'_'+bstr+'_'+fix_str+'_lp'+str(nlp)+'-')
+    else:
+        pmn.run(llhood_fixed, prior_fixslopes, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_JLA_'+zval+'_'+modelval+'_'+pv_str+'_'+bstr+'_'+fix_str+'_lp'+str(nlp)+'-')
+else:
+    fix_str = "freeSlope"
+    npar += 3
+    pmn.run(llhood, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_JLA_'+zval+'_'+modelval+'_'+pv_str+'_'+bstr+'_'+fix_str+'_lp'+str(nlp)+'-')
 t2 = time()
 duration = (t2 - t1) / 60.
 print("It took ", duration, " minutes")

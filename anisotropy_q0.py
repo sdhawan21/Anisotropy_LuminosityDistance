@@ -1,3 +1,10 @@
+"""
+Author: Suhail Dhawan
+
+No "_" tag suggests that we are using Pantheon in this script to constrain the quadrupole and the dipole
+ 
+"""
+
 import numpy as np 
 import matplotlib.pyplot as plt
 import glob
@@ -31,6 +38,7 @@ zHD_SN = data_SN[:,np.where(varnames == "zHD")[0][0]].astype('float32')
 RA_SN = data_SN[:,np.where(varnames == "RA")[0][0]].astype('float32')
 Dec_SN = data_SN[:,np.where(varnames == "DECL")[0][0]].astype('float32')
 
+#define the covariance matrix as the 
 c_SN = np.diag(sigma_SN**2.) + sys_SN
 cinv_SN = np.linalg.inv(c_SN)
 
@@ -88,12 +96,14 @@ def llhood(model_param, ndim, npar):
         theta = [h0, q0, qd, j0, S]
     elif modelval == 'quad_exp_aniso': 
         h0, q0, j0, qd, S, M, lam1, lam2, Sq = [model_param[i] for i in range(9)]
-        theta = [h0, q0, qd, j0, S, lam1, lam2, Sq]
+        theta = [h0, q0, qd, j0, lam1, lam2, Sq]
     elif modelval == 'quad_exp_iso':
         h0, q0, j0, M, lam1, lam2, Sq = [model_param[i] for i in range(7)]
         theta = [h0, q0, j0, lam1, lam2, Sq]
+
+    #define the function for the distance expression
     #for models with a quadrupole, using the quad distance expression
-    if modelval == 'quad_exp_aniso' or 'quad_exp_iso':
+    if modelval == 'quad_exp_aniso' or modelval == 'quad_exp_iso':
         dl_aniso = dl_q0dip_h0quad(z_SN, theta, RA_SN, Dec_SN, model=modelval)
         mu_th = 5 * np.log10(dl_aniso) + 25.
     else:
@@ -170,8 +180,9 @@ elif modelval == 'quad_exp_aniso':
     npar = 9
 elif modelval   == 'quad_exp_iso':
     npar = 7
-nlp = int(sys.argv[5])
+nlp = int(sys.argv[4])
 start = time()
+
 if fitSlopes:
     pmn.run(llhood_fitSlopes, prior_fitSlopes, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/q0aniso_test_'+zval+'_'+modelval+'fitSlopes'+'_lp'+str(nlp)+'-')
 else:

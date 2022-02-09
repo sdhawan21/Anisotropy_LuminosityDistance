@@ -1,5 +1,11 @@
 """
-Fits that are very similar to the _q0_JLA script that are applied for the forecasts for quadrupole fits
+Author: S. Dhawan
+Loc: IoA, Cambridge
+Timeline: late '21, early '22
+I've split the tasks into scripts
+
+This script is dealing with the simulations / forecast constraints 
+
 """
 
 import numpy as np 
@@ -20,6 +26,7 @@ from astropy.cosmology import FlatLambdaCDM
 
 
 np.random.seed(1729) #did I have to do this just because of the Ramanujan story  
+
 #the actual omega_M and h0 shouldnt matter since for the anisotropic case, we'll use "the same" (i.e. equivalent for the monopole)
 flc = FlatLambdaCDM(70., 0.3)
 
@@ -37,13 +44,18 @@ print(varnames)
 mu_SN = data_SN[:,np.where(varnames == "MU")[0][0]].astype('float32')
 muerr_hd = data_SN[:,np.where(varnames == "MUERR")[0][0]].astype('float32')
 
+#this isnt strictly important here since the distances are generated assuming the z as the true redshift
+#and no corrections applied at the inference stage
 zhd = data_SN[:,np.where(varnames == "zHD")[0][0]].astype('float32')
 
 RA_SN = data_SN[:,np.where(varnames == "RA")[0][0]].astype('float32')
 Dec_SN = data_SN[:,np.where(varnames == "DECL")[0][0]].astype('float32')
 
+#how many fold should I augment the low-z anchor (N-1 are added so to get 5 * the anchor, type 4)
 nfac = int(sys.argv[1])
+#take the pantheon coordinate distribution or disperse the SNe uniformly across the sky?
 uniform_coord = bool(sys.argv[2])
+#input the quadrupole or just the LCDM background 
 quad_input = bool(sys.argv[3])
 
 
@@ -87,14 +99,19 @@ stat_only = bool(sys.argv[4])#this needs to be changed with the adequate systema
 
 modelval = 'quad_exp_iso'
 
-#take one sensible value of lambda1, lambda2
-mu_quad = 5 * np.log10(dl_q0dip_h0quad(z_SN, [70., -0.55, 0.4, 0.12, 0.12, 0.03], rasim, decsim, model=modelval)) + 25
+#take one sensible value of lambda1, lambda2 and the scale
+h0_inp = 70; q0_inp = -0.55
+j0_inp = 0.4; lam1 = 0.12; lam2 = 0.12; sq = 0.04
+mu_quad = 5 * np.log10(dl_q0dip_h0quad(z_SN, [h0_inp, q0_inp, j0_inp, lam1, lam2, sq], rasim, decsim, model=modelval)) + 25
 print(len(zsim), len(zhd))
 
 if quad_input:
     mu_sims = mu_quad
 else:
     mu_sims = mu_synth
+
+offset = 0.02 #add a small offset and see how it changes the quadrupole
+mu_sims[z_SN <= 0.1] += offset
 
 C = np.diag(muerr_sim ** 2.) #covariance matrix is stat-only
 
@@ -182,11 +199,11 @@ else:
     coordval  = "trueCoord"
 
 if quad_input:
-    inpval = "NonZeroQuad"
+    inpval = "NonZeroQuadOffset"
 else:
     inpval = "LCDM"
 
-nlp = 200
+nlp = int(sys.argv[5])
 t1 = time()
 pmn.run(llhood, prior_cube, npar, verbose=True, n_live_points=nlp, outputfiles_basename='chains/sims/q0aniso_sims_'+modelval+'_'+coordval+'_'+inpval+'_'+str(nfac)+"_"+cov_str+'_lp'+str(nlp)+'-')
 t2 = time()
